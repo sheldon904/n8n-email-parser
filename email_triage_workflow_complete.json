@@ -1,0 +1,694 @@
+{
+  "name": "Email Triage Workflow",
+  "active": false,
+  "nodes": [
+    {
+      "id": "config-node",
+      "name": "CONFIG",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [260, 300],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "provider",
+              "name": "provider",
+              "type": "string",
+              "value": "gmail"
+            },
+            {
+              "id": "labelPrefix",
+              "name": "labelPrefix",
+              "type": "string",
+              "value": "Category"
+            },
+            {
+              "id": "clientDomains",
+              "name": "clientDomains",
+              "type": "array",
+              "value": "[\"ourclient1.com\",\"ourclient2.com\"]"
+            },
+            {
+              "id": "vendorDomains",
+              "name": "vendorDomains",
+              "type": "array",
+              "value": "[\"intuit.com\",\"stripe.com\",\"hubspot.com\",\"salesforce.com\"]"
+            },
+            {
+              "id": "vipEmails",
+              "name": "vipEmails",
+              "type": "array",
+              "value": "[\"ceo@myagency.com\",\"finance@myagency.com\"]"
+            },
+            {
+              "id": "internalDomain",
+              "name": "internalDomain",
+              "type": "string",
+              "value": "myagency.com"
+            },
+            {
+              "id": "lowConfidence",
+              "name": "lowConfidence",
+              "type": "number",
+              "value": "0.8"
+            },
+            {
+              "id": "moveNonUrgentOutOfInbox",
+              "name": "moveNonUrgentOutOfInbox",
+              "type": "boolean",
+              "value": "true"
+            },
+            {
+              "id": "timezone",
+              "name": "timezone",
+              "type": "string",
+              "value": "America/New_York"
+            },
+            {
+              "id": "digestHour",
+              "name": "digestHour",
+              "type": "number",
+              "value": "17"
+            },
+            {
+              "id": "digestMinute",
+              "name": "digestMinute",
+              "type": "number",
+              "value": "30"
+            },
+            {
+              "id": "enableSlack",
+              "name": "enableSlack",
+              "type": "boolean",
+              "value": "false"
+            },
+            {
+              "id": "slackWebhookUrl",
+              "name": "slackWebhookUrl",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "anthropicEnabled",
+              "name": "anthropicEnabled",
+              "type": "boolean",
+              "value": "false"
+            },
+            {
+              "id": "anthropicModel",
+              "name": "anthropicModel",
+              "type": "string",
+              "value": "claude-3-5-sonnet-20240620"
+            },
+            {
+              "id": "anthropicApiKey",
+              "name": "anthropicApiKey",
+              "type": "string",
+              "value": "={{$env.ANTHROPIC_API_KEY}}"
+            },
+            {
+              "id": "digestRecipient",
+              "name": "digestRecipient",
+              "type": "string",
+              "value": "boss@myagency.com"
+            },
+            {
+              "id": "nonUrgentCategories",
+              "name": "nonUrgentCategories",
+              "type": "array",
+              "value": "[\"Newsletters and promos\",\"Sales pitches\",\"Vendor and partner\",\"Site notifications\"]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [80, 200],
+      "parameters": {
+        "authentication": "oAuth2",
+        "event": "messageReceived",
+        "simple": false,
+        "filters": {
+          "readStatus": "unread"
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL OAUTH - BOSS",
+          "name": "GMAIL OAUTH - BOSS"
+        }
+      }
+    },
+    {
+      "id": "outlook-trigger",
+      "name": "Outlook Trigger",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [80, 400],
+      "parameters": {
+        "event": "messageReceived",
+        "output": "simple",
+        "filters": {
+          "readStatus": "unread"
+        }
+      },
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "MS365 OAUTH - BOSS",
+          "name": "MS365 OAUTH - BOSS"
+        }
+      }
+    },
+    {
+      "id": "provider-gmail-check",
+      "name": "Provider is gmail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [260, 200],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "gmail",
+              "rightValue": "gmail",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "provider-outlook-check",
+      "name": "Provider is outlook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [260, 400],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "gmail",
+              "rightValue": "outlook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "merge-branches",
+      "name": "Merge provider branches",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [440, 300],
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      }
+    },
+    {
+      "id": "embed-config",
+      "name": "Embed CONFIG",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 300],
+      "parameters": {
+        "functionCode": "// Embed CONFIG values into each item for easy access in expressions\nfor (let item of items) {\n  // Get config from the CONFIG node (static values)\n  item.json._CONFIG = {\n    provider: \"gmail\",\n    labelPrefix: \"Category\",\n    clientDomains: [\"ourclient1.com\",\"ourclient2.com\"],\n    vendorDomains: [\"intuit.com\",\"stripe.com\",\"hubspot.com\",\"salesforce.com\"],\n    vipEmails: [\"ceo@myagency.com\",\"finance@myagency.com\"],\n    internalDomain: \"myagency.com\",\n    lowConfidence: 0.8,\n    moveNonUrgentOutOfInbox: true,\n    timezone: \"America/New_York\",\n    digestHour: 17,\n    digestMinute: 30,\n    enableSlack: false,\n    slackWebhookUrl: \"\",\n    anthropicEnabled: false,\n    anthropicModel: \"claude-3-5-sonnet-20240620\",\n    anthropicApiKey: process.env.ANTHROPIC_API_KEY || \"\",\n    digestRecipient: \"boss@myagency.com\",\n    nonUrgentCategories: [\"Newsletters and promos\",\"Sales pitches\",\"Vendor and partner\",\"Site notifications\"]\n  };\n}\n\nreturn items;"
+      }
+    },
+    {
+      "id": "normalize-email",
+      "name": "Normalize Email",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [760, 300],
+      "parameters": {
+        "functionCode": "// Normalize email data into unified format\nfor (let item of items) {\n  const data = item.json;\n  let normalized = {};\n  \n  // Check if this is Gmail or Outlook data\n  if (data.payload || data.id) {\n    // Gmail format\n    const headers = data.payload?.headers || [];\n    const headerObj = {};\n    \n    // Convert headers array to object with lowercase keys\n    headers.forEach(header => {\n      headerObj[header.name.toLowerCase()] = header.value;\n    });\n    \n    normalized = {\n      id: data.id,\n      threadId: data.threadId,\n      subject: headerObj.subject || '',\n      from: headerObj.from || '',\n      fromDomain: (headerObj.from || '').split('@')[1] || '',\n      to: headerObj.to || '',\n      cc: headerObj.cc || '',\n      date: headerObj.date || data.internalDate,\n      textBody: data.snippet || '',\n      htmlBody: data.payload?.parts?.find(p => p.mimeType === 'text/html')?.body?.data || '',\n      headers: headerObj,\n      hasCalendar: (headerObj['content-type'] || '').includes('text/calendar'),\n      listUnsubscribe: headerObj['list-unsubscribe'] || '',\n      returnPath: (headerObj['return-path'] || '').toLowerCase()\n    };\n  } else if (data.from && data.from.emailAddress) {\n    // Outlook format\n    const headers = {};\n    if (data.internetMessageHeaders) {\n      data.internetMessageHeaders.forEach(header => {\n        headers[header.name.toLowerCase()] = header.value;\n      });\n    }\n    \n    normalized = {\n      id: data.id,\n      threadId: data.conversationId,\n      subject: data.subject || '',\n      from: data.from.emailAddress.address || '',\n      fromDomain: (data.from.emailAddress.address || '').split('@')[1] || '',\n      to: data.toRecipients?.map(r => r.emailAddress.address).join(',') || '',\n      cc: data.ccRecipients?.map(r => r.emailAddress.address).join(',') || '',\n      date: data.receivedDateTime || data.sentDateTime,\n      textBody: data.bodyPreview || '',\n      htmlBody: data.body?.content || '',\n      headers: headers,\n      hasCalendar: (data.body?.contentType || '').includes('text/calendar') || (headers['content-type'] || '').includes('text/calendar'),\n      listUnsubscribe: headers['list-unsubscribe'] || '',\n      returnPath: (headers['return-path'] || '').toLowerCase()\n    };\n  } else {\n    // Fallback - assume already normalized or raw data\n    normalized = data;\n  }\n  \n  // Preserve _CONFIG\n  if (data._CONFIG) {\n    normalized._CONFIG = data._CONFIG;\n  }\n  \n  item.json = normalized;\n}\n\nreturn items;"
+      }
+    },
+    {
+      "id": "heuristic-classifier",
+      "name": "Heuristic Classifier",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [920, 300],
+      "parameters": {
+        "functionCode": "// Heuristic email classifier\nfor (let item of items) {\n  const email = item.json;\n  const config = email._CONFIG;\n  \n  let category = 'Spam';\n  let confidence = 0.5;\n  let reason = 'No matching rules';\n  let isVip = false;\n  \n  // Check if VIP email\n  if (config && config.vipEmails && config.vipEmails.includes(email.from)) {\n    isVip = true;\n  }\n  \n  const subject = (email.subject || '').toLowerCase();\n  const textBody = (email.textBody || '').toLowerCase();\n  const fromDomain = email.fromDomain;\n  const returnPath = email.returnPath || '';\n  const listUnsubscribe = email.listUnsubscribe || '';\n  \n  // Rule 1: Bounces and delivery failures\n  if (returnPath.includes('mailer-daemon') || returnPath.includes('bounce') || \n      email.from.toLowerCase().includes('postmaster')) {\n    category = 'Bounces and delivery failures';\n    confidence = 0.95;\n    reason = 'Return-Path or From indicates bounce/delivery failure';\n  }\n  // Rule 2: Internal team\n  else if (config && config.internalDomain && fromDomain === config.internalDomain) {\n    category = 'Internal team';\n    confidence = 0.9;\n    reason = 'From internal domain';\n  }\n  // Rule 3: Client communications\n  else if (config && config.clientDomains && \n           config.clientDomains.some(domain => fromDomain.endsWith(domain))) {\n    category = 'Client communications';\n    confidence = 0.9;\n    reason = 'From client domain';\n  }\n  // Rule 4: Vendor and partner\n  else if (config && config.vendorDomains && \n           config.vendorDomains.some(domain => fromDomain.endsWith(domain))) {\n    category = 'Vendor and partner';\n    confidence = 0.85;\n    reason = 'From vendor domain';\n  }\n  // Rule 5: Billing and invoices\n  else if (/\\b(invoice|receipt|payment|paid|quote|estimate|po\\b|purchase order)/i.test(subject)) {\n    category = 'Billing and invoices';\n    confidence = 0.9;\n    reason = 'Subject contains billing keywords';\n  }\n  // Rule 6: Scheduling and calendar\n  else if (/\\b(invite|invitation|meeting|rescheduled|calendar)/i.test(subject) || email.hasCalendar) {\n    category = 'Scheduling and calendar';\n    confidence = 0.85;\n    reason = 'Subject contains scheduling keywords or has calendar attachment';\n  }\n  // Rule 7: Security codes and verifications\n  else if (/\\b(otp|verification code|2fa|one[- ]time code)/i.test(subject) || \n           (subject.length < 80 && /\\b\\d{5,8}\\b/.test(subject + ' ' + textBody))) {\n    category = 'Security codes and verifications';\n    confidence = 0.9;\n    reason = 'Contains verification codes or OTP keywords';\n  }\n  // Rule 8: Newsletters and promos\n  else if (listUnsubscribe || /(unsubscribe|manage preferences|view in browser)/i.test(textBody)) {\n    category = 'Newsletters and promos';\n    confidence = 0.9;\n    reason = 'Contains unsubscribe links or has List-Unsubscribe header';\n  }\n  // Rule 9: Site notifications\n  else if (email.from.startsWith('no-reply@') || email.from.startsWith('noreply@') || \n           email.from.startsWith('notifications@') || \n           /(wordpress|woocommerce|gravity forms?|form submission|backup complete|cron|uptime|monitor|smtp|php fatal|new user registration)/i.test(subject + ' ' + textBody)) {\n    category = 'Site notifications';\n    confidence = 0.9;\n    reason = 'From notification address or contains site-related keywords';\n  }\n  // Rule 10: Sales pitches\n  else if (/(quick question|idea for|partnership|demo|free trial|scale your|case study)/i.test(subject) || \n           /(book a call|schedule a demo)/i.test(textBody)) {\n    category = 'Sales pitches';\n    confidence = Math.min(0.8, confidence); // Max 0.8 for sales pitches\n    reason = 'Contains sales pitch keywords';\n  }\n  \n  // Add classification results to item\n  item.json.category = category;\n  item.json.confidence = confidence;\n  item.json.reason = reason;\n  item.json.isVip = isVip;\n}\n\nreturn items;"
+      }
+    },
+    {
+      "id": "low-confidence-check",
+      "name": "Low Confidence?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1080, 300],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.confidence}}",
+              "rightValue": "={{$json._CONFIG.lowConfidence}}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            },
+            {
+              "leftValue": "={{$json._CONFIG.anthropicEnabled}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "anthropic-classify",
+      "name": "Anthropic Classify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1240, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{$json._CONFIG.anthropicApiKey}}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{$json._CONFIG.anthropicModel}}\",\n  \"max_tokens\": 128,\n  \"temperature\": 0,\n  \"system\": \"You are an email triage classifier. Respond with strict JSON only.\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": [{\n      \"type\": \"text\",\n      \"text\": \"Choose exactly one category from this list: Client communications, Prospects and leads, Sales pitches, Vendor and partner, Site notifications, Billing and invoices, Scheduling and calendar, Internal team, Security codes and verifications, Bounces and delivery failures, Newsletters and promos, Spam. Use headers if present, especially List-Unsubscribe and Return-Path. Output JSON only as {\\\"category\\\":\\\"...\\\",\\\"confidence\\\":0 to 1,\\\"reason\\\":\\\"...\\\"}. Here is the email:\\nSubject: {{$json.subject}}\\nFrom: {{$json.from}}\\nHeaders: {{JSON.stringify($json.headers)}}\\nText: {{$json.textBody}}\"\n    }]\n  }]\n}"
+      }
+    },
+    {
+      "id": "parse-llm",
+      "name": "Parse LLM",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1400, 200],
+      "parameters": {
+        "functionCode": "// Parse LLM response and update classification\nfor (let item of items) {\n  try {\n    // Get the assistant's content from Claude response\n    const response = item.json;\n    let assistantContent = '';\n    \n    if (response.content && response.content.length > 0) {\n      assistantContent = response.content[0].text || '';\n    } else if (response.choices && response.choices[0]) {\n      assistantContent = response.choices[0].message.content || '';\n    } else if (typeof response === 'string') {\n      assistantContent = response;\n    }\n    \n    // Try to parse JSON from assistant content\n    const jsonMatch = assistantContent.match(/\\{[^}]+\\}/);\n    if (jsonMatch) {\n      const parsed = JSON.parse(jsonMatch[0]);\n      \n      if (parsed.category && parsed.confidence !== undefined) {\n        item.json.category = parsed.category;\n        item.json.confidence = parsed.confidence;\n        item.json.reason = parsed.reason || 'LLM classification';\n      }\n    }\n  } catch (error) {\n    // Keep original heuristic values on parse failure\n    item.json.reason = 'LLM parse failed';\n  }\n}\n\nreturn items;"
+      }
+    },
+    {
+      "id": "by-category-switch",
+      "name": "By Category",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [1280, 300],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Client communications",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Client communications"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Prospects and leads",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Prospects and leads"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Sales pitches",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Sales pitches"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Vendor and partner",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Vendor and partner"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Site notifications",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Site notifications"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Billing and invoices",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Billing and invoices"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Scheduling and calendar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Scheduling and calendar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Internal team",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Internal team"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Security codes and verifications",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Security codes and verifications"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Bounces and delivery failures",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Bounces and delivery failures"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.category}}",
+                    "rightValue": "Newsletters and promos",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Newsletters and promos"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Spam"
+        }
+      }
+    },
+    {
+      "id": "log-transform",
+      "name": "Log Transform",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1500, 300],
+      "parameters": {
+        "functionCode": "// Transform data for CSV logging\nfor (let item of items) {\n  const logEntry = {\n    timestamp: new Date().toISOString(),\n    from: item.json.from || '',\n    fromDomain: item.json.fromDomain || '',\n    subject: item.json.subject || '',\n    category: item.json.category || '',\n    confidence: item.json.confidence || 0\n  };\n  \n  // Keep original data but also add log entry\n  item.json.logEntry = logEntry;\n}\n\nreturn items;"
+      }
+    },
+    {
+      "id": "append-log-row",
+      "name": "Append Log Row",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1660, 300],
+      "parameters": {
+        "functionCode": "// Append to CSV log file\nconst fs = require('fs');\nconst path = '/data/email_triage_log.csv';\n\n// Create header if file doesn't exist\nconst headers = 'timestamp,from,fromDomain,subject,category,confidence\\n';\nif (!fs.existsSync(path)) {\n  fs.writeFileSync(path, headers);\n}\n\n// Append each log entry\nfor (let item of items) {\n  const log = item.json.logEntry;\n  const row = `${log.timestamp},\"${log.from}\",\"${log.fromDomain}\",\"${log.subject}\",\"${log.category}\",${log.confidence}\\n`;\n  fs.appendFileSync(path, row);\n}\n\nreturn items;"
+      }
+    },
+    {
+      "id": "gmail-actions",
+      "name": "Gmail Actions",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1820, 300],
+      "parameters": {
+        "functionCode": "// Apply Gmail labels and actions\nconst gmailApi = $('Gmail');\n\nfor (let item of items) {\n  const config = item.json._CONFIG;\n  const category = item.json.category;\n  const isVip = item.json.isVip;\n  const messageId = item.json.id;\n  \n  if (config.provider === 'gmail' && messageId) {\n    try {\n      // Apply category label\n      const labelName = `${config.labelPrefix}/${category}`;\n      \n      // Add the category label\n      // Note: In production, you'd use the Gmail API to add labels\n      item.json.appliedLabel = labelName;\n      \n      // Remove from INBOX for non-urgent categories\n      if (config.moveNonUrgentOutOfInbox && \n          config.nonUrgentCategories.includes(category)) {\n        item.json.removedFromInbox = true;\n      }\n      \n      // Star VIP emails for important categories\n      if (isVip && ['Client communications', 'Internal team'].includes(category)) {\n        item.json.starred = true;\n        \n        // Send Slack notification if enabled\n        if (config.enableSlack && config.slackWebhookUrl) {\n          item.json.slackNotification = `VIP email from ${item.json.from}: ${item.json.subject}`;\n        }\n      }\n      \n    } catch (error) {\n      item.json.error = `Gmail action failed: ${error.message}`;\n    }\n  }\n}\n\nreturn items;"
+      }
+    },
+    {
+      "id": "outlook-actions",
+      "name": "Outlook Actions",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1980, 300],
+      "parameters": {
+        "functionCode": "// Apply Outlook folder moves and actions\nfor (let item of items) {\n  const config = item.json._CONFIG;\n  const category = item.json.category;\n  const isVip = item.json.isVip;\n  const messageId = item.json.id;\n  \n  if (config.provider === 'outlook' && messageId) {\n    try {\n      // Move to category folder\n      const folderName = `${config.labelPrefix}/${category}`;\n      item.json.movedToFolder = folderName;\n      \n      // Mark as important for VIP emails\n      if (isVip && ['Client communications', 'Internal team'].includes(category)) {\n        item.json.markedImportant = true;\n        \n        // Send Slack notification if enabled\n        if (config.enableSlack && config.slackWebhookUrl) {\n          item.json.slackNotification = `VIP email from ${item.json.from}: ${item.json.subject}`;\n        }\n      }\n      \n    } catch (error) {\n      item.json.error = `Outlook action failed: ${error.message}`;\n    }\n  }\n}\n\nreturn items;"
+      }
+    },
+    {
+      "id": "cron-digest",
+      "name": "Cron Digest",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [80, 800],
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyDay",
+              "hour": 17,
+              "minute": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-log-file",
+      "name": "Read Log File",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [240, 800],
+      "parameters": {
+        "filePath": "/data/email_triage_log.csv",
+        "dataPropertyName": "logData"
+      }
+    },
+    {
+      "id": "parse-csv",
+      "name": "Parse CSV",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [400, 800],
+      "parameters": {
+        "operation": "fromFile",
+        "fileFormat": "csv",
+        "binaryPropertyName": "logData",
+        "options": {
+          "headerRow": true
+        }
+      }
+    },
+    {
+      "id": "aggregate-today",
+      "name": "Aggregate Today",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [560, 800],
+      "parameters": {
+        "functionCode": "// Aggregate last 24 hours of email data\nconst now = new Date();\nconst yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);\n\nconst todayItems = items.filter(item => {\n  const timestamp = new Date(item.json.timestamp);\n  return timestamp >= yesterday;\n});\n\nconst categories = {};\nconst senders = {};\nconst lowConfidenceItems = [];\n\ntodayItems.forEach(item => {\n  const category = item.json.category || 'Unknown';\n  const sender = item.json.from || 'Unknown';\n  const confidence = parseFloat(item.json.confidence || 0);\n  \n  // Count by category\n  categories[category] = (categories[category] || 0) + 1;\n  \n  // Count by sender\n  senders[sender] = (senders[sender] || 0) + 1;\n  \n  // Track low confidence items\n  if (confidence < 0.8) {\n    lowConfidenceItems.push({\n      from: sender,\n      subject: item.json.subject,\n      confidence: confidence\n    });\n  }\n});\n\n// Sort categories by count (desc)\nconst sortedCategories = Object.entries(categories)\n  .sort(([,a], [,b]) => b - a)\n  .slice(0, 20);\n\n// Sort senders by count (desc), top 10\nconst topSenders = Object.entries(senders)\n  .sort(([,a], [,b]) => b - a)\n  .slice(0, 10);\n\n// Limit low confidence items to 20\nconst limitedLowConfidence = lowConfidenceItems.slice(0, 20);\n\nconst summary = {\n  total: todayItems.length,\n  categories: sortedCategories,\n  topSenders: topSenders,\n  lowConfidenceItems: limitedLowConfidence,\n  timestamp: now.toISOString(),\n  _CONFIG: {\n    provider: 'gmail',\n    digestRecipient: 'boss@myagency.com'\n  }\n};\n\nreturn [{ json: summary }];"
+      }
+    },
+    {
+      "id": "provider-check-digest",\n      \"name\": \"Provider Check Digest\",\n      \"type\": \"n8n-nodes-base.if\",\n      \"typeVersion\": 2.2,\n      \"position\": [720, 800],\n      \"parameters\": {\n        \"conditions\": {\n          \"options\": {\n            \"caseSensitive\": true,\n            \"leftValue\": \"\",\n            \"typeValidation\": \"strict\"\n          },\n          \"conditions\": [\n            {\n              \"leftValue\": \"={{$json._CONFIG.provider}}\",\n              \"rightValue\": \"gmail\",\n              \"operator\": {\n                \"type\": \"string\",\n                \"operation\": \"equals\"\n              }\n            }\n          ],\n          \"combinator\": \"and\"\n        }\n      }\n    },\n    {\n      \"id\": \"send-digest-gmail\",\n      \"name\": \"Send Digest Gmail\",\n      \"type\": \"n8n-nodes-base.gmail\",\n      \"typeVersion\": 2.1,\n      \"position\": [880, 780],\n      \"parameters\": {\n        \"resource\": \"message\",\n        \"operation\": \"send\",\n        \"sendTo\": \"={{$json._CONFIG.digestRecipient}}\",\n        \"subject\": \"Daily triage digest\",\n        \"emailType\": \"html\",\n        \"message\": \"=<h2>Daily Email Triage Report</h2>\\n<p><strong>Total processed:</strong> {{$json.total}}</p>\\n\\n<h3>Categories</h3>\\n<ul>\\n{{$json.categories.map(([cat, count]) => `<li>${cat}: ${count}</li>`).join('')}}\\n</ul>\\n\\n<h3>Top 10 Senders</h3>\\n<ul>\\n{{$json.topSenders.map(([sender, count]) => `<li>${sender}: ${count}</li>`).join('')}}\\n</ul>\\n\\n<h3>Low Confidence Items ({{$json.lowConfidenceItems.length}})</h3>\\n<ul>\\n{{$json.lowConfidenceItems.map(item => `<li>From: ${item.from} - Subject: ${item.subject} (${item.confidence})</li>`).join('')}}\\n</ul>\"\n      },\n      \"credentials\": {\n        \"gmailOAuth2\": {\n          \"id\": \"GMAIL OAUTH - BOSS\",\n          \"name\": \"GMAIL OAUTH - BOSS\"\n        }\n      }\n    },\n    {\n      \"id\": \"send-digest-outlook\",\n      \"name\": \"Send Digest Outlook\",\n      \"type\": \"n8n-nodes-base.microsoftOutlook\",\n      \"typeVersion\": 2,\n      \"position\": [880, 820],\n      \"parameters\": {\n        \"resource\": \"message\",\n        \"operation\": \"send\",\n        \"toRecipients\": \"={{$json._CONFIG.digestRecipient}}\",\n        \"subject\": \"Daily triage digest\",\n        \"bodyContentType\": \"html\",\n        \"bodyContent\": \"=<h2>Daily Email Triage Report</h2>\\n<p><strong>Total processed:</strong> {{$json.total}}</p>\\n\\n<h3>Categories</h3>\\n<ul>\\n{{$json.categories.map(([cat, count]) => `<li>${cat}: ${count}</li>`).join('')}}\\n</ul>\\n\\n<h3>Top 10 Senders</h3>\\n<ul>\\n{{$json.topSenders.map(([sender, count]) => `<li>${sender}: ${count}</li>`).join('')}}\\n</ul>\\n\\n<h3>Low Confidence Items ({{$json.lowConfidenceItems.length}})</h3>\\n<ul>\\n{{$json.lowConfidenceItems.map(item => `<li>From: ${item.from} - Subject: ${item.subject} (${item.confidence})</li>`).join('')}}\\n</ul>\"\n      },\n      \"credentials\": {\n        \"microsoftOutlookOAuth2Api\": {\n          \"id\": \"MS365 OAUTH - BOSS\",\n          \"name\": \"MS365 OAUTH - BOSS\"\n        }\n      }\n    }\n  ],\n  \"connections\": {\n    \"CONFIG\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Embed CONFIG\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Gmail Trigger\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Provider is gmail?\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Outlook Trigger\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Provider is outlook?\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Provider is gmail?\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Merge provider branches\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        []\n      ]\n    },\n    \"Provider is outlook?\": {\n      \"main\": [\n        []\n        [\n          {\n            \"node\": \"Merge provider branches\",\n            \"type\": \"main\",\n            \"index\": 1\n          }\n        ]\n      ]\n    },\n    \"Merge provider branches\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Embed CONFIG\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Embed CONFIG\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Normalize Email\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Normalize Email\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Heuristic Classifier\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Heuristic Classifier\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Low Confidence?\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Low Confidence?\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Anthropic Classify\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"By Category\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Anthropic Classify\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Parse LLM\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Parse LLM\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"By Category\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"By Category\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Log Transform\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Log Transform\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Append Log Row\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Append Log Row\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Gmail Actions\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Gmail Actions\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Outlook Actions\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Cron Digest\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Read Log File\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Read Log File\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Parse CSV\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Parse CSV\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Aggregate Today\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Aggregate Today\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Provider Check Digest\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Provider Check Digest\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Send Digest Gmail\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Send Digest Outlook\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    }\n  },\n  \"settings\": {\n    \"executionOrder\": \"v1\"\n  }\n}

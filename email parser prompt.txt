@@ -1,0 +1,195 @@
+You are an expert n8n architect and JSON generator. Your task is to OUTPUT A SINGLE VALID n8n WORKFLOW EXPORT JSON THAT IMPORTS WITHOUT EDITS. No prose. No code fences. JSON only. the final output file should be able ot be imported into n8n as a complete workflow you are to use the n8n buiodler mcp I have actiated, this is critical.
+
+Goal
+- Build an email triage workflow for my boss that reads each incoming email and auto categorizes it using fast rules, with an optional LLM backstop when unsure.
+- Then it applies a label or moves the message to a folder that matches the category.
+- It also sends a daily digest email with counts by category, top senders, and a short list of low confidence items.
+
+Environment and constraints
+- n8n version: current stable 1.x
+- Use nodes that exist in vanilla n8n 1.x
+- Do NOT include credentials inside the export. Refer to credentials by name only.
+- Output must be a single workflow object, not an array. The JSON must contain at minimum: "name", "nodes", "connections", "settings" or "settings" omitted if default, "pinData" omitted, "staticData" omitted, "meta" omitted if not required. Include "active": false.
+- Every node must have a unique "id" and "name", "type", "typeVersion", "parameters", and a "position" with integers.
+- All expressions must use n8n syntax like ={{$json.field}} or ={{$env.VAR}}. Do not use backticks in expressions.
+- Placeholders must be plain strings I can change after import.
+
+Configuration values that must be created as a first "Set" node named "CONFIG"
+- provider: "gmail" or "outlook"  [put the default as "gmail"]
+- labelPrefix: "Category"          [prefix for labels or folder group]
+- clientDomains: ["ourclient1.com","ourclient2.com"]
+- vendorDomains: ["intuit.com","stripe.com","hubspot.com","salesforce.com"]
+- vipEmails: ["ceo@myagency.com","finance@myagency.com"]
+- internalDomain: "myagency.com"
+- lowConfidence: 0.8
+- moveNonUrgentOutOfInbox: true
+- timezone: "America/New_York"
+- digestHour: 17
+- digestMinute: 30
+- enableSlack: false
+- slackWebhookUrl: ""              [optional, used only if enableSlack is true]
+- anthropicEnabled: false
+- anthropicModel: "claude-3-5-sonnet-20240620"
+- anthropicApiKey: "={{$env.ANTHROPIC_API_KEY}}"  [use in HTTP headers]
+- digestRecipient: "boss@myagency.com"
+- nonUrgentCategories: ["Newsletters and promos","Sales pitches","Vendor and partner","Site notifications"]
+
+Categories to support exactly as written
+- Client communications
+- Prospects and leads
+- Sales pitches
+- Vendor and partner
+- Site notifications
+- Billing and invoices
+- Scheduling and calendar
+- Internal team
+- Security codes and verifications
+- Bounces and delivery failures
+- Newsletters and promos
+- Spam
+
+High level flow
+1) Trigger on new mail for the selected provider.
+   - If provider == "gmail": use "Gmail Trigger" node, only unread, include full payload. Credential name placeholder: "GMAIL OAUTH - BOSS".
+   - If provider == "outlook": use "Microsoft Outlook Trigger" node for new message in Inbox. Credential name placeholder: "MS365 OAUTH - BOSS".
+   - Implementation note: include both triggers in the workflow. Immediately after them, add two "IF" filter nodes so only the active provider passes through. The non selected branch should end in a "NoOp" Merge node so the workflow still imports. Connect the selected branch to the next step using the "CONFIG" provider value.
+
+2) Normalize message into a unified shape.
+   - Add a "Function" node named "Normalize Email" that outputs a single item with fields:
+     {
+       id, threadId, subject, from, fromDomain, to, cc, date, textBody, htmlBody, headers (object with lowercased header names), hasCalendar, listUnsubscribe, returnPath
+     }
+   - Compute fromDomain from the right side of the From address.
+   - hasCalendar is true if headers Content-Type includes "text/calendar".
+   - listUnsubscribe is the List-Unsubscribe header string if present else empty.
+   - returnPath is the Return-Path header lowercased.
+
+3) Heuristic classifier.
+   - Add a "Function" node named "Heuristic Classifier" that reads the normalized fields and sets:
+     category, confidence, reason, isVip (boolean).
+   - Use rules:
+     - If Return-Path contains "mailer-daemon" or "bounce" or From contains "postmaster" -> Bounces and delivery failures, confidence 0.95.
+     - If fromDomain equals internalDomain -> Internal team, confidence 0.9.
+     - If fromDomain endsWith any clientDomains -> Client communications, confidence 0.9.
+     - If fromDomain endsWith any vendorDomains -> Vendor and partner, confidence 0.85.
+     - If subject matches /\binvoice|receipt|payment|paid|quote|estimate|po\b|purchase order/i -> Billing and invoices, confidence 0.9.
+     - If subject matches /\binvite|invitation|meeting|rescheduled|calendar/i or hasCalendar true -> Scheduling and calendar, confidence 0.85.
+     - If subject matches /\botp|verification code|2fa|one[- ]time code/i OR subject length < 80 and subject or body contains a 5 to 8 digit number -> Security codes and verifications, confidence 0.9.
+     - If listUnsubscribe is present OR body contains /(unsubscribe|manage preferences|view in browser)/i -> Newsletters and promos, confidence 0.9.
+     - If sender starts with no-reply@ or noreply@ or notifications@ OR subject or body matches /(wordpress|woocommerce|gravity forms?|form submission|backup complete|cron|uptime|monitor|smtp|php fatal|new user registration)/i -> Site notifications, confidence 0.9.
+     - If subject matches /(quick question|idea for|partnership|demo|free trial|scale your|case study)/i OR body contains /(book a call|schedule a demo)/i -> Sales pitches, confidence max with 0.8.
+     - If none matched -> default category Spam, confidence 0.5.
+   - Set isVip true if From equals any vipEmails.
+   - Keep previous fields on the item.
+
+4) Optional LLM backstop when confidence < lowConfidence AND anthropicEnabled is true.
+   - Add an "IF" node named "Low Confidence?" that checks confidence < lowConfidence and anthropicEnabled is true from CONFIG.
+   - If false -> skip to routing step.
+   - If true -> call an "HTTP Request" node named "Anthropic Classify" with:
+     - Method: POST
+     - URL: https://api.anthropic.com/v1/messages
+     - Headers: 
+       x-api-key: value from CONFIG.anthropicApiKey expression
+       anthropic-version: "2023-06-01"
+       content-type: application/json
+     - JSON body:
+       {
+         "model": "={{$json._CONFIG.anthropicModel}}",
+         "max_tokens": 128,
+         "temperature": 0,
+         "system": "You are an email triage classifier. Respond with strict JSON only.",
+         "messages":[{"role":"user","content":[
+           {"type":"text","text":"Choose exactly one category from this list: Client communications, Prospects and leads, Sales pitches, Vendor and partner, Site notifications, Billing and invoices, Scheduling and calendar, Internal team, Security codes and verifications, Bounces and delivery failures, Newsletters and promos, Spam. Use headers if present, especially List-Unsubscribe and Return-Path. Output JSON only as {\"category\":\"...\",\"confidence\":0 to 1,\"reason\":\"...\"}. Here is the email:\nSubject: {{$json.subject}}\nFrom: {{$json.from}}\nHeaders: {{$json.headers}}\nText: {{$json.textBody}}"}]}]
+       }
+     - After the HTTP node, add a "Function" node named "Parse LLM" that parses the JSON string in the assistant content and overwrites category, confidence, reason on the item. If parsing fails, keep the heuristic values and set reason to "LLM parse failed".
+
+   Implementation detail for passing CONFIG values into expressions
+   - Right after the "CONFIG" Set node, add a "Function" node named "Embed CONFIG" that puts the config object into each item as _CONFIG so expressions like {{$json._CONFIG.provider}} can be used everywhere. Insert this directly after both triggers via a Merge node.
+
+5) Routing and actions.
+   - Add a "Switch" node named "By Category" with cases for each category string above. Default goes to "Spam".
+   - For Gmail branch:
+     - Add nodes that apply labels using the "Gmail" node with Credential name "GMAIL OAUTH - BOSS".
+     - For nonUrgentCategories AND moveNonUrgentOutOfInbox true, remove INBOX label after adding the Category label.
+     - For VIP emails where isVip true AND category is Client communications or Internal team, also star the message and send a notification if enableSlack is true using a "Webhook" node to slackWebhookUrl with a plain text payload "VIP email from {{$json.from}}: {{$json.subject}}".
+
+   - For Outlook branch:
+     - Add nodes that move the mail into folders under labelPrefix, for example "Category/Client communications". Use the "Microsoft Outlook" node with Credential name "MS365 OAUTH - BOSS".
+     - For VIP emails similar to Gmail, mark as important if supported and send Slack notification if enabled.
+
+   - Implementation detail:
+     - Include both Gmail and Outlook action nodes under each category, but guard execution with an "IF provider == gmail" or "IF provider == outlook" before each set of provider specific nodes so only the selected provider path runs. Use the value in _CONFIG.provider for the checks.
+     - For Spam default, do not delete. Only apply a "Category/Spam" label or move to a "Category/Spam" folder.
+
+6) Daily digest.
+   - Add a "Cron" node set to daily at digestHour and digestMinute using timezone in CONFIG.
+   - Connect Cron into a "Function" node named "Aggregate Today" that queries the last 24 hours of processed items. Since cross run storage can vary, implement the digest by:
+     - During classification path, write one line per email into an "Append to file" using "Write Binary File" is not suitable. Instead use the "Spreadsheet File" node with mode "Append" on a CSV stored at /data/email_triage_log.csv with columns: timestamp, from, fromDomain, subject, category, confidence.
+     - In the daily digest branch, use a "Read Binary File" to read that CSV then a "Spreadsheet File" node to parse it, filter rows by timestamp within last 24 hours, aggregate counts by category and top 10 senders inside a "Function" node. 
+   - Send the digest email using the provider specific "Gmail" or "Microsoft Outlook" send nodes based on CONFIG.provider. Subject: "Daily triage digest". Body should include:
+     - total processed
+     - counts by category sorted desc
+     - top 10 senders
+     - a bullet list of up to 20 items where confidence < lowConfidence with From and Subject
+   - Attach the filtered last 24 hours CSV as an attachment.
+
+7) Error handling
+   - Add an "Error Trigger" workflow within the same JSON is not allowed for single export, so inside this workflow add failure branches wherever a mail move or label application occurs. On failure, add a label "Category/Needs manual" or move to a "Needs manual" folder and continue.
+
+Node list that must exist with these exact names
+- CONFIG  [Set]
+- Gmail Trigger  [Gmail Trigger]
+- Outlook Trigger  [Microsoft Outlook Trigger]
+- Provider is gmail?  [IF]  checks "={{$json._CONFIG.provider}} == 'gmail'"
+- Provider is outlook?  [IF]  checks "={{$json._CONFIG.provider}} == 'outlook'"
+- Embed CONFIG  [Function] injects _CONFIG into each item
+- Normalize Email  [Function]
+- Heuristic Classifier  [Function]
+- Low Confidence?  [IF]
+- Anthropic Classify  [HTTP Request]
+- Parse LLM  [Function]
+- By Category  [Switch]
+- For each category C, create:
+  - IF provider gmail for C  [IF]
+  - Gmail: Apply label C  [Gmail]
+  - Gmail: Maybe remove INBOX for C  [Gmail]
+  - IF provider outlook for C  [IF]
+  - Outlook: Move to C  [Microsoft Outlook]
+- VIP Notify?  [IF]  checks isVip true AND category in ["Client communications","Internal team"]
+- Slack Notify  [Webhook] posts to slackWebhookUrl when enableSlack is true
+- Cron Digest  [Cron]
+- Append Log Row  [Spreadsheet File] append to /data/email_triage_log.csv
+- Read Log File  [Read Binary File]
+- Parse CSV  [Spreadsheet File]  to JSON
+- Aggregate Today  [Function]
+- Send Digest Gmail  [Gmail]  guarded by provider gmail
+- Send Digest Outlook  [Microsoft Outlook]  guarded by provider outlook
+
+Important implementation details
+- Immediately after each trigger, add a "Merge" node (Name: "Merge provider branches") of type "Merge By Position" to join the selected provider branch into a single stream. Only the selected branch will have items due to IF checks.
+- Make sure "Normalize Email" handles both Gmail and Outlook message shapes:
+  - Gmail Trigger: fields are usually in binary "payload" and "headers". Use provided properties like "from", "to", "subject", "textHtml", "textPlain" when available. Fallback by decoding base64 if needed.
+  - Outlook Trigger: fields like "from.emailAddress.address", "subject", "bodyPreview", "body.content", "internetMessageHeaders".
+- In "Heuristic Classifier", reuse these helper ideas in code:
+  - Lowercase subject and bodies once.
+  - siteNotifPatterns: /(wordpress|woocommerce|gravity forms?|form submission|backup complete|cron|uptime|statuspage|monitor|smtp|php fatal|new user registration)/i
+- Before applying Gmail labels, add the labelPrefix. Final label example: "Category/Client communications".
+- For Outlook, create or use folders with the same names under the Inbox.
+- For the CSV log, ensure the "Spreadsheet File" node creates the file if not present and uses headers: ["timestamp","from","fromDomain","subject","category","confidence"].
+- For daily digest time window, compute now minus 24h using new Date() and ISO strings, filter in "Aggregate Today".
+
+Credential placeholders to reference by name
+- Gmail nodes: credential name "GMAIL OAUTH - BOSS"
+- Microsoft Outlook nodes: credential name "MS365 OAUTH - BOSS"
+
+Absolute requirements
+- Output must be a single JSON workflow. No extra text. No comments.
+- All nodes must be connected from the trigger to actions so the workflow is runnable.
+- Use only ASCII characters and normal quotes so the JSON parser accepts it.
+- Do not use external community nodes.
+
+Set CONFIG defaults as described above. Set provider default to "gmail".
+
+Now generate the final n8n workflow export JSON that implements everything above. 
+
+Use the latest n8njson formats, nodes, connections, and data structures including everything thats supported by n8n. use the mcp to the fullest. do not forget to use the mcp you have. it is a really important step. i want a clean, production ready blueprint that uses all best pratices and is drop in ready, no filler, no outdated elements, no unconnected nodes. dont stop untill we have the perfect json. save the generated output inside a file.
